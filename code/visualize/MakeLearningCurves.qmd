@@ -1,0 +1,160 @@
+---
+title: "Make Learning Curves"
+author: "Anonymous"
+format: html
+editor: source
+---
+
+This file plots learning curves which illustrate a reasoning gap.
+
+# Imports and constants
+
+```{r imports}
+library(plyr)
+library(tidyverse)
+library(ggthemes)
+knitr::opts_knit$set(root.dir = "../..")
+```
+
+```{r constants}
+TRAIN_CONDITIONS <- c("local-joint-exp", "fully-observed-held-out")
+GENERATION_CONDITIONS <- c("free", "direct")
+NET_IDXS <- c(2, 28, 33, 51, 6, 61, 64, 68, 81, 9)
+STEPS_PER_CHECKPOINT = 5000
+DVs = c("true", "marginal")
+train_condition_strs <- c(
+  "fully-observed"="fully observed",
+  "fully-observed-held-out"="fully observed",
+  "local-joint-exp"="local (geom)",
+  "local-joint-zipf"="local (zipf)",
+  "non-local-zipf"="non-local (size based on Zipfian)",
+  "wrong-local-joint-exp"="wrong local (geom)",
+  "wrong-local-joint-zipf"="wrong local (zipf)"
+)
+estimator_strs <- c(
+  "fixed"="direct prediction",
+  "direct"="direct prediction",
+  "free"="free generation",
+  "negative_scaffolded"="negative scaffolded generation",
+  "scaffolded"="scaffolded generation"
+)
+TOKENS_PER_GRADIENT_STEP = 3072
+```
+
+# Load the data
+
+We read in all the learning curve files here.
+
+```{r load_data}
+df <- data.frame()
+df_true <- data.frame()
+for (net_i in NET_IDXS) {
+  df_true <- read_csv(sprintf("data/evaluation/true-probs/true-probabilities-net-%s.csv", net_i)) |>
+                                  mutate(type = "true")
+  for (train_cond in TRAIN_CONDITIONS) {
+      print(train_cond)
+      print(net_i)
+      df_curve = read_csv(sprintf("data/evaluation/learning-curves/learning-curves-%s-net-%s.csv", train_cond, net_i)) |>
+        filter(type != "true") |>
+        select(-one_of("Unnamed: 0.1", "Unnamed: 0.2"))
+      
+      df_curve = df_curve |>
+        merge(df_true |> select(target_var, condition_var, condition_val, prob) |> rename(true=prob) |> mutate(condition_val = as.integer(condition_val)),
+            on=c(target_var, condition_var, condition_val)
+        ) |>
+        mutate(
+          train_condition = train_cond,
+          net_idx = net_i
+        )
+      df = rbind(df, df_curve)
+  }
+}
+df = df |>
+  mutate(
+    n_steps = as.integer(str_extract(checkpoint, "\\d+$")),
+    n_tokens = TOKENS_PER_GRADIENT_STEP * n_steps
+    )
+```
+
+# Compute MSEs
+
+We compute mean squared error for each combination of training condition and estimator.
+
+```{r compute_mses}
+df_mse <- data.frame()
+for (n_step in unique(df$n_steps)) {
+  for (train_cond in TRAIN_CONDITIONS) {
+    for (generation_condition in GENERATION_CONDITIONS) {
+      df_cond <- df |>
+        filter(n_steps == n_step & type == generation_condition & train_condition == train_cond)
+
+      se <- (df_cond[["prob"]] - df_cond[["true"]]) ^ 2
+      df_se_with_ci <- mean_cl_boot(se) |>
+        rename(sqE=y, ci_lower=ymin, ci_upper=ymax) |>
+        mutate(
+          train_condition=train_cond,
+          generation_condition=generation_condition,
+          n_steps=n_step,
+        )
+      df_mse <- rbind(df_mse, df_se_with_ci)
+    }
+  }
+}
+```
+
+# Plot learning curves
+
+First, we compute the shaded region on the plot, showing the "reasoning gap"
+
+```{r compute_reasoning_gap}
+df_gap <- df_mse |>
+  filter(train_condition == "local-joint-exp") |>
+  group_by(n_steps) |>
+  summarize(
+    gap_min = min(sqE),
+    gap_max = max(sqE)
+  ) |>
+  ungroup() |>
+  mutate(n_tokens = TOKENS_PER_GRADIENT_STEP * n_steps) |>
+  filter(n_steps < 3e5 & !is.na(n_steps))
+```
+
+Next, we make the plot.
+
+```{r plot_curves}
+df_mse |>
+  filter(n_steps < 3e5) %>%
+  mutate(n_tokens = TOKENS_PER_GRADIENT_STEP * n_steps) %>%
+  ggplot(
+      data = .,
+      mapping = aes(x = n_tokens, y = sqE, color=train_condition_strs[train_condition],fill=train_condition_strs[train_condition], linetype=estimator_strs[generation_condition])
+  ) + 
+    geom_ribbon(aes(ymin=ci_lower, ymax=ci_upper), alpha=0.15, color=NA) +
+    geom_ribbon(
+      data=df_gap,
+      inherit.aes = F,
+      aes(x=n_tokens, ymin=gap_min, ymax=gap_max),
+      alpha=0.4,
+      color="darkgrey") +
+    geom_point(size=0.5) +
+    geom_line(linewidth=0.5) +
+    scale_y_continuous(limits=c(0, NA)) +
+    labs(
+      x = "Number of tokens",
+      y = "Mean squared error",
+      linetype = "Estimator",
+      color = "Train condition"
+    ) +
+    theme_tufte() + 
+    scale_color_solarized() +
+    scale_fill_solarized() +
+    theme(
+      axis.text=element_text(size=10),
+      axis.title=element_text(size=16),
+      strip.text=element_text(size=14),
+      legend.text=element_text(size=14),
+      legend.title=element_text(size=16)
+    ) +
+    guides(color = guide_legend(override.aes = list(fill=NA, alpha=1, linetype=0, size=4)), fill=guide_none(), linetype = guide_legend(override.aes = list(fill=NA, linewidth=1)))
+ggsave("figures/learning-curves.pdf", bg="white", height=4, width=10)
+```

@@ -1,0 +1,259 @@
+---
+title: "Plot All Conditions"
+author: "Anonymous"
+format: html
+editor: source
+---
+
+This file produces the bar plots and tables of mean squared error for different training conditions and estimators.
+
+# Imports and constants
+
+```{r imports}
+library(plyr)
+library(tidyverse)
+library(ggthemes)
+knitr::opts_knit$set(root.dir = "../..")
+```
+
+```{r constants}
+TRAIN_CONDITIONS <- c("fully-observed-held-out", "local-joint-exp", "local-joint-zipf", "wrong-local-joint-exp", "wrong-local-joint-zipf")
+GENERATION_CONDITIONS <- c("fixed", "scaffolded", "free", "negative_scaffolded")
+NET_IDXS <- c(2, 28, 33, 51, 6, 61, 64, 68, 81, 9)
+DVs = c("true", "marginal")
+train_condition_strs <- c(
+  "fully-observed-held-out"="fully observed",
+  "local-joint-exp"="local (geom)",
+  "local-joint-zipf"="local (zipf)",
+  "non-local-zipf"="non-local (size based on Zipfian)",
+  "wrong-local-joint-exp"="wrong local (geom)",
+  "wrong-local-joint-zipf"="wrong local (zipf)"
+)
+train_condition_strs_lst <- c(
+  "fully observed",
+  "local (geom)",
+  "local (zipf)",
+  "wrong local (geom)",
+  "wrong local (zipf)"
+)
+estimator_strs <- c(
+  "fixed"="direct prediction",
+  "free"="free generation",
+  "negative_scaffolded"="negative scaffolded",
+  "scaffolded"="scaffolded"
+)
+```
+
+# Load the data
+
+Here, we load the data from the many files containing the data that will go into our plots and tables.
+
+```{r read_and_merge}
+df <- data.frame()
+df_non_held_out <- data.frame()
+for (net_idx in NET_IDXS) {
+  df_true <- read_csv(sprintf("data/evaluation/true-probs/true-probabilities-net-%s.csv", 
+                                  net_idx)) |>
+                                  mutate(type = "true")
+
+  for (train_condition in TRAIN_CONDITIONS) {
+    df_fixed <- read_csv(sprintf("data/evaluation/fixed-gen-probabilities-%s-net-%s.csv", 
+                                    train_condition, net_idx)) |>
+      mutate(type = "fixed")
+
+    df_free <- read_csv(sprintf("data/evaluation/free-gen-probabilities-%s-net-%s.csv", 
+                                    train_condition, net_idx)) |>
+      mutate(type = "free")
+
+    df_scaffolded <- read_csv(sprintf("data/evaluation/scaffolded-gen-probabilities-%s-net-%s.csv",
+                                    train_condition, net_idx)) |>
+      mutate(type = "scaffolded")
+
+    df_negative_scaffolded <- read_csv(sprintf("data/evaluation/negative-scaffolded-gen-probabilities-%s-net-%s.csv", train_condition, net_idx)) |>
+      mutate(type = "negative_scaffolded")
+
+    df_all_test_conditions <- rbind.fill(df_true, df_fixed, df_free, df_scaffolded, df_negative_scaffolded) |>
+      pivot_wider(
+        id_cols=c(target_var, condition_var, condition_val),
+        names_from=type,
+        values_from=prob
+      ) |>
+      merge(df_true |> select(-c(type, prob)),
+          on=c(target_var, condition_var, condition_val)) |>
+      mutate(
+        net_idx = net_idx,
+        train_condition = train_condition
+      )
+
+    df_held_out <- df_all_test_conditions |>
+      filter(!is.na(scaffolded))
+
+    df_non_held_out_pairs <- read_csv(sprintf("data/training-data/non-selected-pairs/non-selected-pairs-net-%s.csv", net_idx))
+    df_non_held_out_1 <- df_fixed |>
+      inner_join(df_non_held_out_pairs, by=c("condition_var" = "var1", "target_var" = "var2"))
+    df_non_held_out_2 <- df_fixed |>
+      inner_join(df_non_held_out_pairs, by=c("condition_var" = "var2", "target_var" = "var1"))
+    df_non_held_out_both <- rbind.fill(df_non_held_out_1, df_non_held_out_2) |>
+      pivot_wider(
+        id_cols=c(target_var, condition_var, condition_val),
+        names_from=type,
+        values_from=prob
+      ) |>
+      left_join(df_true |> select(-c(type)),
+          by=c("target_var"="target_var", "condition_var"="condition_var", "condition_val"="condition_val")) |>
+      mutate(
+        net_idx = net_idx,
+        train_condition = train_condition
+      ) |>
+      rename(true = prob)
+
+    df <- rbind(df, df_held_out)   
+    df_non_held_out <- rbind(df_non_held_out, df_non_held_out_both)
+  }
+}
+```
+
+# Compute mean squared errors
+
+Here, we compute the MSE for each combination of train condition and estimator for the held-out pairs.
+
+```{r}
+df_mse <- data.frame()
+for (train_cond in TRAIN_CONDITIONS) {
+  df_cond <- df |>
+    filter(train_condition == train_cond)
+  for (generation_condition in GENERATION_CONDITIONS) {
+    for (dv in DVs) {
+      se <- (df_cond[[generation_condition]] - df_cond[[dv]]) ^ 2
+      df_se_with_ci <- mean_cl_boot(se) |>
+        rename(sqE=y, ci_lower=ymin, ci_upper=ymax) |>
+        mutate(
+          train_condition=train_cond,
+          generation_condition=generation_condition,
+          dv=dv
+        )
+      df_mse <- rbind(df_mse, df_se_with_ci)
+    }
+  }
+}
+
+df_mse = df_mse |>
+  mutate(train_condition = factor(train_condition, levels=TRAIN_CONDITIONS, labels=train_condition_strs_lst))
+```
+
+We also do the same for non-held-out pairs
+
+```{r}
+df_mse_nho <- data.frame()
+for (train_cond in TRAIN_CONDITIONS) {
+  df_cond <- df_non_held_out |>
+    filter(train_condition == train_cond)
+    for (dv in DVs) {
+      se <- (df_cond[["fixed"]] - df_cond[[dv]]) ^ 2
+      df_se_with_ci <- mean_cl_boot(se) |>
+        rename(sqE=y, ci_lower=ymin, ci_upper=ymax) |>
+        mutate(
+          train_condition=train_cond,
+          generation_condition="fixed",
+          dv=dv
+        )
+      df_mse_nho <- rbind(df_mse_nho, df_se_with_ci)
+  }
+}
+df_mse_nho = df_mse_nho |>
+  mutate(train_condition = factor(train_condition, levels=TRAIN_CONDITIONS, labels=train_condition_strs_lst))
+```
+
+# The main plot
+
+This is Figure 2 in the paper.
+
+```{r}
+df_mse |>
+  filter(dv == "true") %>%
+  ggplot(
+    data = .,
+    mapping = aes(x = train_condition, y = sqE, fill = estimator_strs[generation_condition])
+  ) +
+    geom_bar(stat="identity", position=position_dodge(0.85), width=0.8) +
+    geom_errorbar(aes(ymin=ci_lower, ymax=ci_upper), width=0, position=position_dodge(0.85)) +
+    scale_y_continuous(limits=c(0, 0.15)) +
+    labs(
+      x = "Train condition",
+      y = "Mean squared error",
+      fill = "Estimator"
+    ) +
+    theme_tufte() + 
+    scale_fill_solarized() +
+    theme(
+      axis.text=element_text(size=10),
+      axis.title=element_text(size=14),
+      strip.text=element_text(size=14),
+      legend.text=element_text(size=10),
+      legend.title=element_text(size=12)
+      )
+ggsave("figures/all_conditions_mse_plot.pdf", bg="white", width=8, height=4)
+```
+
+# Compute tables
+
+The following code chunks compute the cells of tables that appear in the paper
+
+```{r mse_table}
+# this one doesn't appear in the paper, but might be interesting nonetheless
+table_str = ""
+for (train_cond in TRAIN_CONDITIONS) {
+  table_str = paste(table_str, sprintf("& %s", train_condition_strs[train_cond]))
+}
+table_str = paste(table_str, "\\\\\n")
+
+for (generation_cond in GENERATION_CONDITIONS) { 
+  table_str = paste(table_str, estimator_strs[generation_cond])
+  for (train_cond in TRAIN_CONDITIONS) {
+    row = df_mse |>
+      filter(train_condition == train_condition_strs[train_cond] & generation_condition == generation_cond & dv == "true")
+    table_str = paste(table_str, sprintf("& %.3f [%.3f, %.3f]", row$sqE, row$ci_lower, row$ci_upper))
+  }
+  table_str = paste(table_str, "\\\\\n")
+}
+cat(table_str)
+```
+
+```{r marginal_mse_table}
+marginal_table_str = ""
+for (train_cond in TRAIN_CONDITIONS) {
+  marginal_table_str = paste(marginal_table_str, sprintf("& %s", train_condition_strs[train_cond]))
+}
+marginal_table_str = paste(marginal_table_str, "\\\\\n")
+
+for (generation_cond in GENERATION_CONDITIONS) { 
+  marginal_table_str = paste(marginal_table_str, estimator_strs[generation_cond])
+  for (train_cond in TRAIN_CONDITIONS) {
+    row = df_mse |>
+      filter(train_condition == train_condition_strs[train_cond] & generation_condition == generation_cond & dv == "marginal")
+    marginal_table_str = paste(marginal_table_str, sprintf("& %.3f [%.3f, %.3f]", row$sqE, row$ci_lower, row$ci_upper))
+  }
+  marginal_table_str = paste(marginal_table_str, "\\\\\n")
+}
+cat(marginal_table_str)
+```
+
+```{r nho_mse_table}
+nho_table_str = ""
+for (train_cond in TRAIN_CONDITIONS) {
+  nho_table_str = paste(nho_table_str, sprintf("& %s", train_condition_strs[train_cond]))
+}
+nho_table_str = paste(nho_table_str, "\\\\\n")
+
+for (dep_var in DVs) { 
+  nho_table_str = paste(nho_table_str, dep_var)
+  for (train_cond in TRAIN_CONDITIONS) {
+    row = df_mse_nho |>
+      filter(train_condition == train_condition_strs[train_cond] & generation_condition == "fixed" & dv == dep_var)
+    nho_table_str = paste(nho_table_str, sprintf("& %.3f [%.3f, %.3f]", row$sqE, row$ci_lower, row$ci_upper))
+  }
+  nho_table_str = paste(nho_table_str, "\\\\\n")
+}
+
+cat(nho_table_str)
+```
