@@ -80,7 +80,7 @@ data/evaluation/scaffolded-gen-probabilities-$(MODEL_NAME).csv: $(MODEL_ROOT_FOL
 		--scaffold_file data/scaffolds/scaffolds-$(MODEL_NAME).json \
 		--net_idx $(NET_ID) \
 		--device "cuda:0" \
-		--num_samples 100 \
+		--num_samples 10 \
 		--bayes-net-file data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
 
 data/evaluation/negative-scaffolded-gen-probabilities-$(MODEL_NAME).csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin data/scaffolds/negative-scaffolds-net-$(NET_ID).csv code/evaluate/scaffolded_generation_probabilities.py data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
@@ -89,7 +89,7 @@ data/evaluation/negative-scaffolded-gen-probabilities-$(MODEL_NAME).csv: $(MODEL
 		--scaffold_file data/scaffolds/scaffolds-$(MODEL_NAME).json \
 		--net_idx $(NET_ID) \
 		--device "cuda:0" \
-		--num_samples 100 \
+		--num_samples 10 \
 		--bayes-net-file data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl \
 		--negative
 
