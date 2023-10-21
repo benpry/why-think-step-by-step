@@ -1,5 +1,5 @@
 """
-This file computes probabilities with "fixed generation" a.k.a. direct prediction, where we don't generate any individual values
+This file computes probabilities with "fixed generation" where we don't generate any individual values
 """
 import torch
 from pyprojroot import here
@@ -10,22 +10,7 @@ import pandas as pd
 import sys
 
 sys.path.extend(["../core", "./core", "./code/core"])
-from utils import set_up_transformer, PAD_TOKEN_ID, ZERO_TOKEN_ID, ONE_TOKEN_ID
-
-
-def get_probability_from_transformer(prefix, tokenizer, model, args):
-    """
-    Get the probability of 1 given a particular prefix with a tokenizer and model    
-    """
-    token_ids = tokenizer(prefix, return_tensors="pt").input_ids.to(args.device)
-    outputs = model.generate(token_ids, return_dict_in_generate=True, max_new_tokens=1, output_scores=True,
-                             return_tensors="pt", pad_token_id=PAD_TOKEN_ID)
-
-    output_logits = outputs.scores[0][0]
-    zero_one_logits = output_logits[[ZERO_TOKEN_ID, ONE_TOKEN_ID]]
-    prob = torch.softmax(zero_one_logits, dim=-1)[1].item()
-
-    return prob
+from utils import set_up_transformer, get_probability_from_transformer
 
 def main(args):
     model, tokenizer = set_up_transformer(args.model_folder, device=args.device)
@@ -72,10 +57,11 @@ parser.add_argument("--net_idx", type=int)
 parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--bayes-net-file", type=str)
 parser.add_argument("--only_selected_vars", action="store_true")
+parser.add_argument("--base_model_name", type=str)
 
 if __name__ == "__main__":
     args = parser.parse_args()
 
     df = main(args)
     model_name = args.model_folder.split("/")[-1]
-    df.to_csv(here(f"data/evaluation/fixed-gen-probabilities-{model_name}.csv"))
+    df.to_csv(here(f"data/evaluation/base-model-{args.base_model_name}/fixed-gen-probabilities-{model_name}.csv"))

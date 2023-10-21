@@ -1,6 +1,9 @@
 """
-This file generates from the model using a pre-computed scaffold of variables
+This file queries the model using the scaffolded generation order
 """
+import torch
+from transformers import pipeline
+from omegaconf import DictConfig
 from pyprojroot import here
 from itertools import product
 from argparse import ArgumentParser
@@ -10,6 +13,7 @@ from tqdm import tqdm
 import pickle
 import pandas as pd
 import sys
+import json
 
 sys.path.extend(["../core", "./core", "./code/core"])
 from utils import set_up_transformer, get_probability_from_transformer
@@ -33,6 +37,7 @@ parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--num_samples", type=int, default=100)
 parser.add_argument("--bayes-net-file", type=str)
 parser.add_argument("--negative", action="store_true", default=False)
+parser.add_argument("--base_model_name", type=str)
 
 if __name__ == "__main__":
 
@@ -85,6 +90,6 @@ if __name__ == "__main__":
     df_summary.columns = df_summary.columns.map(''.join)
     df_summary = df_summary.rename(columns={"probmean": "prob", "probstd": "prob_std"})
     if args.negative:
-        df_summary.to_csv(here(f"data/evaluation/negative-scaffolded-gen-probabilities-{model_name}.csv"))
+        df_summary.to_csv(here(f"data/evaluation/base-model-{args.base_model_name}/negative-scaffolded-gen-probabilities-{model_name}-{args.num_samples}samples.csv"))
     else:
-        df_summary.to_csv(here(f"data/evaluation/scaffolded-gen-probabilities-{model_name}.csv"))
+        df_summary.to_csv(here(f"data/evaluation/base-model-{args.base_model_name}/scaffolded-gen-probabilities-{model_name}-{args.num_samples}samples.csv"))
