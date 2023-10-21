@@ -1,0 +1,148 @@
+---
+title: "Architecture Comparison"
+author: "Ben Prystawski"
+format: html
+editor: source
+---
+
+# Imports and loading data
+
+```{r imports, message=F}
+library(plyr)
+library(tidyverse)
+library(here)
+library(ggthemes)
+```
+
+```{r constants}
+ARCHITECTURES <- c("base-lm", "tiny", "small", "different", "large")
+TRAIN_CONDITION <- "local-joint-exp"
+GENERATION_CONDITIONS <- c("fixed", "negative_scaffolded", "free", "scaffolded")
+DVs <- c("true")
+estimator_strs <- c(
+    "fixed" = "direct prediction",
+    "negative_scaffolded" = "negative scaffolded",
+    "free" = "free generation",
+    "scaffolded" = "scaffolded"
+)
+estimator_strs_lst <- c(
+    "direct prediction",
+    "negative scaffolded",
+    "free generation",
+    "scaffolded"
+)
+NET_IDXS <- c(2, 28, 33, 51, 6, 61, 64, 68, 81, 9)
+
+NUM_SAMPLES <- 10
+```
+
+```{r read_and_merge, message=F}
+df <- data.frame()
+for (net_idx in NET_IDXS) {
+    df_true <- read_csv(here(sprintf(
+        "data/evaluation/true-probs/true-probabilities-net-%s.csv",
+        net_idx
+    ))) |>
+        mutate(type = "true")
+
+    for (architecture in ARCHITECTURES) {
+        df_fixed <- read_csv(here(sprintf(
+            "data/evaluation/base-model-%s/fixed-gen-probabilities-%s-net-%s.csv",
+            architecture, TRAIN_CONDITION, net_idx
+        ))) |>
+            mutate(type = "fixed")
+
+        df_free <- read_csv(here(sprintf(
+            "data/evaluation/base-model-%s/free-gen-probabilities-%s-net-%s-%ssamples.csv",
+            architecture, TRAIN_CONDITION, net_idx, NUM_SAMPLES
+        ))) |>
+            mutate(type = "free")
+
+        df_scaffolded <- read_csv(here(sprintf(
+            "data/evaluation/base-model-%s/scaffolded-gen-probabilities-%s-net-%s-%ssamples.csv",
+            architecture, TRAIN_CONDITION, net_idx, NUM_SAMPLES
+        ))) |>
+            mutate(type = "scaffolded")
+
+        df_negative_scaffolded <- read_csv(here(sprintf(
+            "data/evaluation/base-model-%s/negative-scaffolded-gen-probabilities-%s-net-%s-%ssamples.csv",
+            architecture, TRAIN_CONDITION, net_idx, NUM_SAMPLES
+        ))) |>
+            mutate(type = "negative_scaffolded")
+
+        df_all_test_conditions <- rbind.fill(df_true, df_fixed, df_free, df_scaffolded, df_negative_scaffolded) |>
+            pivot_wider(
+                id_cols = c(target_var, condition_var, condition_val),
+                names_from = type,
+                values_from = prob
+            ) |>
+            merge(df_true |> select(-c(type, prob)),
+                on = c(target_var, condition_var, condition_val)
+            ) |>
+            mutate(
+                net_idx = net_idx,
+                train_condition = TRAIN_CONDITION,
+                architecture = architecture
+            )
+
+        df_held_out <- df_all_test_conditions |>
+            filter(!is.na(scaffolded))
+
+        df <- rbind(df, df_held_out)
+    }
+}
+```
+
+# Compute mean squared error for each architecture and estimator
+```{r}
+df_mse <- data.frame()
+for (arch in ARCHITECTURES) {
+    df_cond <- df |>
+        filter(architecture == arch)
+    for (generation_condition in GENERATION_CONDITIONS) {
+        for (dv in DVs) {
+            se <- (df_cond[[generation_condition]] - df_cond[[dv]])^2
+            df_se_with_ci <- mean_cl_boot(se) |>
+                rename(sqE = y, ci_lower = ymin, ci_upper = ymax) |>
+                mutate(
+                    architecture = arch,
+                    train_condition = TRAIN_CONDITION,
+                    generation_condition = generation_condition,
+                    dv = dv
+                )
+            df_mse <- rbind(df_mse, df_se_with_ci)
+        }
+    }
+}
+df_mse <- df_mse |>
+    mutate(generation_condition = factor(generation_condition, levels = GENERATION_CONDITIONS, labels = estimator_strs_lst))
+```
+
+# Plot MSE by architecture and estimator
+```{r}
+df_mse |>
+    filter(dv == "true") |>
+    mutate(architecture = factor(architecture, levels = c("base-lm", "small", "large", "different", "tiny"), labels = c("original", "smaller", "larger", "wider", "tiny"))) %>%
+    ggplot(
+        data = .,
+        mapping = aes(x = architecture, y = sqE, fill = generation_condition)
+    ) +
+    geom_bar(stat = "identity", position = position_dodge(0.85), width = 0.8) +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0, position = position_dodge(0.85)) +
+    scale_y_continuous(limits = c(0, 0.15)) +
+    labs(
+        x = "Architecture",
+        y = "Mean squared error on held-out pairs",
+        fill = "Estimator"
+    ) +
+    theme_tufte() +
+    scale_fill_solarized() +
+    theme(
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 14),
+        strip.text = element_text(size = 14),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)
+    )
+ggsave(here("figures/architecture-comparison.pdf"), bg = "white", width = 8, height = 4)
+```

@@ -1,0 +1,182 @@
+---
+title: "One Sample Analysis"
+author: "Ben Prystawski"
+format: html
+editor: source
+---
+
+# Imports and loading data
+
+```{r imports, message=F}
+library(plyr)
+library(tidyverse)
+library(here)
+library(ggthemes)
+```
+
+```{r constants}
+TRAIN_CONDITIONS <- c("local-joint-exp")
+GENERATION_CONDITIONS <- c("fixed", "negative_scaffolded", "scaffolded", "free")
+NET_IDXS <- c(2, 28, 33, 51, 6, 61, 64, 68, 81, 9)
+DVs <- c("true")
+train_condition_strs <- c(
+    "fully-observed" = "fully obs. (no held-out)",
+    "fully-observed-held-out" = "fully observed",
+    "local-joint-exp" = "local (geom)",
+    "local-joint-zipf" = "local (zipf)",
+    "non-local-zipf" = "non-local (size based on Zipfian)",
+    "wrong-local-joint-exp" = "wrong local (geom)",
+    "wrong-local-joint-zipf" = "wrong local (zipf)"
+)
+train_condition_strs_lst <- c(
+    "fully observed",
+    "local (geom)",
+    "local (zipf)",
+    "wrong local (geom)",
+    "wrong local (zipf)"
+)
+estimator_strs <- c(
+    "fixed" = "direct prediction",
+    "free" = "free generation",
+    "negative_scaffolded" = "negative scaffolded",
+    "scaffolded" = "scaffolded"
+)
+estimator_strs_lst <- c(
+    "fixed",
+    "negative_scaffolded",
+    "free",
+    "scaffolded"
+)
+estimator_labels_lst <- c(
+    "direct prediction",
+    "negative scaffolded",
+    "free generation",
+    "scaffolded"
+)
+
+NUMS_SAMPLES <- 1:10
+BASE_ARCH <- "base-lm"
+```
+
+```{r read_and_merge, message=F}
+df <- data.frame()
+df_non_held_out <- data.frame()
+for (net_idx in NET_IDXS) {
+    df_true <- read_csv(here(sprintf(
+        "data/evaluation/true-probs/true-probabilities-net-%s.csv",
+        net_idx
+    ))) |>
+        mutate(type = "true")
+
+    for (train_condition in TRAIN_CONDITIONS) {
+        df_fixed <- read_csv(here(sprintf(
+            "data/evaluation/fixed-gen-probabilities-%s-net-%s.csv",
+            train_condition, net_idx
+        ))) |>
+            mutate(type = "fixed")
+
+        for (num_samples in NUMS_SAMPLES) {
+            df_free <- read_csv(here(sprintf(
+                "data/evaluation/base-model-%s/free-gen-probabilities-%s-net-%s-%ssamples.csv",
+                BASE_ARCH, train_condition, net_idx, num_samples
+            ))) |>
+                mutate(type = "free")
+
+            df_scaffolded <- read_csv(here(sprintf(
+                "data/evaluation/base-model-%s/scaffolded-gen-probabilities-%s-net-%s-%ssamples.csv",
+                BASE_ARCH, train_condition, net_idx, num_samples
+            ))) |>
+                mutate(type = "scaffolded")
+
+            df_negative_scaffolded <- read_csv(here(sprintf("data/evaluation/base-model-%s/negative-scaffolded-gen-probabilities-%s-net-%s-%ssamples.csv", BASE_ARCH, train_condition, net_idx, num_samples))) |>
+                mutate(type = "negative_scaffolded")
+
+            df_all_test_conditions <- rbind.fill(df_true, df_fixed, df_free, df_scaffolded, df_negative_scaffolded) |>
+                pivot_wider(
+                    id_cols = c(target_var, condition_var, condition_val),
+                    names_from = type,
+                    values_from = prob
+                ) |>
+                merge(df_true |> select(-c(type, prob)),
+                    on = c(target_var, condition_var, condition_val)
+                ) |>
+                mutate(
+                    net_idx = net_idx,
+                    train_condition = train_condition,
+                    num_samples = num_samples
+                )
+
+            df_held_out <- df_all_test_conditions |>
+                filter(!is.na(scaffolded))
+
+            df <- rbind(df, df_held_out)
+        }
+    }
+}
+```
+
+Compute mean squared error by train condition and number of samples
+```{r}
+df_mse <- data.frame()
+for (train_cond in TRAIN_CONDITIONS) {
+    for (n_samples in NUMS_SAMPLES) {
+        df_cond <- df |>
+            filter(train_condition == train_cond & num_samples == n_samples)
+        for (generation_condition in GENERATION_CONDITIONS) {
+            for (dv in DVs) {
+                se <- (df_cond[[generation_condition]] - df_cond[[dv]])^2
+                df_se_with_ci <- mean_cl_boot(se) |>
+                    rename(sqE = y, ci_lower = ymin, ci_upper = ymax) |>
+                    mutate(
+                        train_condition = train_cond,
+                        num_samples = n_samples,
+                        generation_condition = generation_condition,
+                        dv = dv
+                    )
+                df_mse <- rbind(df_mse, df_se_with_ci)
+            }
+        }
+    }
+}
+```
+
+# Make the plot
+```{r}
+fixed_gen_baseline <- df_mse |>
+    filter(generation_condition == "fixed") |>
+    summarize(msqE = mean(sqE)) |>
+    pull(msqE)
+
+df_mse_samples <- df_mse |>
+    filter(generation_condition != "fixed") |>
+    mutate(generation_condition = factor(generation_condition, levels = estimator_strs_lst, labels = estimator_labels_lst))
+
+ggplot(
+    data = df_mse_samples,
+    mapping = aes(
+        x = num_samples,
+        y = sqE,
+        ymin = ci_lower, ymax = ci_upper,
+        color = generation_condition,
+        fill = generation_condition
+    )
+) +
+    geom_hline(yintercept = fixed_gen_baseline, linewidth = 1.5, color = "#268bd2") +
+    geom_line(linewidth = 0.75) +
+    geom_point(size = 1.5) +
+    geom_ribbon(color = NA, alpha = 0.2) +
+    scale_x_discrete(limits = 1:10) +
+    scale_y_continuous(limits = c(0, NA)) +
+    labs(
+        x = "number of samples",
+        y = "Mean squared error on held-out pairs",
+        color = "Estimator"
+    ) +
+    theme_tufte() +
+    scale_color_solarized() +
+    scale_color_manual(values = c("#dc322f", "#d33682", "#859900")) +
+    scale_fill_manual(values = c("#dc322f", "#d33682", "#859900")) +
+    guides(fill = "none")
+
+ggsave(here("figures/performance_by_num_samples.pdf"), bg = "white", width = 8, height = 4)
+```

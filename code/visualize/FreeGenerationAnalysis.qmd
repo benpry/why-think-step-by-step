@@ -1,0 +1,124 @@
+---
+title: "Analyze Free Generation"
+author: "Ben Prystawski"
+format: html
+editor: source
+---
+
+# Imports and loading data
+
+```{r imports, message=F}
+library(plyr)
+library(tidyverse)
+library(here)
+library(ggthemes)
+```
+
+```{r constants}
+TRAIN_CONDITIONS <- c("fully observed", "local", "wrong local")
+COND_ABSTRACT_TO_CONCRETE <- list(
+    "fully observed" = c("fully-observed-held-out"),
+    "local" = c("local-joint-exp", "local-joint-zipf"),
+    "wrong local" = c("wrong-local-joint-exp", "wrong-local-joint-zipf")
+)
+GENERATION_CONDITIONS <- c("fixed", "scaffolded", "free", "negative_scaffolded")
+NET_IDXS <- c(2, 28, 33, 51, 6, 61, 64, 68, 81, 9)
+NUM_SAMPLES <- 10
+BASE_MODEL <- "base-lm"
+DVs <- c("true", "marginal")
+model_strs <- c(
+    "local-joint-exp" = "geometric local joints",
+    "fully-observed" = "fully observed",
+    "fully-observed-held-out" = "fully observed",
+    "local-joint-zipf" = "Zipfian local joints",
+    "non-local-zipf" = "non-local (size based on Zipfian)",
+    "wrong-local-joint-exp" = "wrong local joint (exp)",
+    "wrong-local-joint-zipf" = "wrong local joint (zipf)"
+)
+```
+
+In this file, we look at "abstract conditions" (local, fully-observed, and wrong local) that aggregate over different training conditions. We read the data in by mapping each condition to a concrete training condition. and map them to concrete training conditions.
+
+```{r read_and_merge, message=F}
+df <- data.frame()
+df_free_all <- data.frame()
+for (net_idx in NET_IDXS) {
+    df_true <- read_csv(here(sprintf(
+        "data/evaluation/true-probs/true-probabilities-net-%s.csv",
+        net_idx
+    ))) |>
+        mutate(type = "true")
+
+    for (train_condition in TRAIN_CONDITIONS) {
+        for (conc_condition in COND_ABSTRACT_TO_CONCRETE[[train_condition]]) {
+            df_free <- read_csv(here(sprintf(
+                "data/evaluation/base-model-%s/free-gen-probabilities-%s-net-%s-%ssamples.csv",
+                BASE_MODEL, conc_condition, net_idx, NUM_SAMPLES
+            ))) |>
+                mutate(
+                    type = "free",
+                    train_condition = train_condition,
+                    net_idx = net_idx
+                )
+            df_free_all <- rbind(df_free_all, df_free)
+
+            df_all_test_conditions <- rbind.fill(df_true, df_free) |>
+                pivot_wider(
+                    id_cols = c(target_var, condition_var, condition_val),
+                    names_from = type,
+                    values_from = prob
+                ) |>
+                merge(df_true |> select(-c(type, prob)),
+                    on = c(target_var, condition_var, condition_val)
+                ) |>
+                merge(df_free |> select(target_var, condition_var, condition_val, n_intermediate),
+                    on = c(target_var, condition_var, condition_val)
+                ) |>
+                mutate(
+                    net_idx = net_idx,
+                    prob_diff = abs(free - true),
+                    train_condition = train_condition
+                )
+
+            df_held_out <- df_all_test_conditions |>
+                filter(!is.na(free))
+
+            df <- rbind(df, df_held_out)
+        }
+    }
+}
+```
+
+# Number of variables generated vs. absolute error
+```{r num_variables_vs_error}
+df |>
+    mutate(train_condition = factor(train_condition, levels = c("local", "wrong local", "fully observed"))) %>%
+    ggplot(
+        data = .,
+        mapping = aes(x = n_intermediate, y = prob_diff, color = train_condition)
+    ) +
+    # facet_wrap(~train_condition) +
+    geom_point(alpha = 0.2, stroke = NA, size = 3) +
+    geom_smooth(method = "lm") +
+    labs(
+        x = "Number of intermediate variables",
+        y = "Distance from target probability",
+        color = "Training condition"
+    ) +
+    guides(color = guide_legend(override.aes = list(fill = NA, alpha = 1, linetype = 0, size = 4))) +
+    theme_tufte() +
+    scale_color_solarized() +
+    theme(
+        text = element_text(size = 18)
+    )
+
+ggsave(here("figures/n_intermediate_vs_dist.pdf"), width = 9, height = 4, bg = "white")
+```
+
+# How often does the generated set of variables d-separate the condition and target variables?
+
+```{r how_often_d_sep}
+df_free_all |>
+    group_by(train_condition) |>
+    summarize(prop_d_separating = mean(prop_d_separating, na.rm = T))
+```
