@@ -1,4 +1,4 @@
-.PHONY: results, learning_curves
+.PHONY: results, results_no_free, learning_curves, eval_results
 
 data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl: code/make_train_data/generate_bayes_nets.py
 	python code/make_train_data/generate_bayes_nets.py \
@@ -58,61 +58,81 @@ data/samples/$(MODEL_NAME)_raw.csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_m
 		--prefix_style "random_conditions_and_targets" \
 		--n_vars $(N_NODES)
 
-data/evaluation/fixed-gen-probabilities-$(MODEL_NAME).csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin code/evaluate/fixed_generation_probabilities.py
+data/evaluation/base-model-$(BASE_MODEL_NAME)/fixed-gen-probabilities-$(MODEL_NAME).csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin code/evaluate/fixed_generation_probabilities.py
 	python code/evaluate/fixed_generation_probabilities.py \
 		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
+		--base_model_name $(BASE_MODEL_NAME) \
 		--net_idx $(NET_ID) \
 		--device "cuda:0" \
 		--bayes-net-file data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
 
 
-data/evaluation/free-gen-probabilities-$(MODEL_NAME).csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin code/evaluate/free_generation_probabilities.py
+data/evaluation/base-model-$(BASE_MODEL_NAME)/free-gen-probabilities-$(MODEL_NAME)-$(NUM_SAMPLES)samples.csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin code/evaluate/free_generation_probabilities.py
 	python code/evaluate/free_generation_probabilities.py \
 		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
+		--base_model_name $(BASE_MODEL_NAME) \
 		--net_idx $(NET_ID) \
 		--device "cuda:0" \
-		--num_samples 10 \
+		--num_samples $(NUM_SAMPLES) \
 		--bayes-net-file data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
 
-data/evaluation/scaffolded-gen-probabilities-$(MODEL_NAME).csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin data/scaffolds/scaffolds-net-$(NET_ID).csv code/evaluate/scaffolded_generation_probabilities.py data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
+data/evaluation/base-model-$(BASE_MODEL_NAME)/scaffolded-gen-probabilities-$(MODEL_NAME)-$(NUM_SAMPLES)samples.csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin data/scaffolds/scaffolds-net-$(NET_ID).csv code/evaluate/scaffolded_generation_probabilities.py data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
 	python code/evaluate/scaffolded_generation_probabilities.py \
 		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
+		--base_model_name $(BASE_MODEL_NAME) \
 		--scaffold_file data/scaffolds/scaffolds-$(MODEL_NAME).json \
 		--net_idx $(NET_ID) \
 		--device "cuda:0" \
-		--num_samples 10 \
+		--num_samples $(NUM_SAMPLES) \
 		--bayes-net-file data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
 
-data/evaluation/negative-scaffolded-gen-probabilities-$(MODEL_NAME).csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin data/scaffolds/negative-scaffolds-net-$(NET_ID).csv code/evaluate/scaffolded_generation_probabilities.py data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
+data/evaluation/base-model-$(BASE_MODEL_NAME)/negative-scaffolded-gen-probabilities-$(MODEL_NAME)-$(NUM_SAMPLES)samples.csv: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin data/scaffolds/negative-scaffolds-net-$(NET_ID).csv code/evaluate/scaffolded_generation_probabilities.py data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
 	python code/evaluate/scaffolded_generation_probabilities.py \
 		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
+		--base_model_name $(BASE_MODEL_NAME) \
 		--scaffold_file data/scaffolds/scaffolds-$(MODEL_NAME).json \
 		--net_idx $(NET_ID) \
 		--device "cuda:0" \
-		--num_samples 10 \
+		--num_samples $(NUM_SAMPLES) \
 		--bayes-net-file data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl \
 		--negative
 
-data/evaluation/learning-curves/learning-curves-$(MODEL_NAME).csv: code/evaluate/make_learning_curves.py code/evaluate/free_generation_probabilities.py code/evaluate/fixed_generation_probabilities.py
+data/evaluation/base-model-$(BASE_MODEL_NAME)/learning-curves/learning-curves-$(MODEL_NAME).csv: code/evaluate/make_learning_curves.py code/evaluate/free_generation_probabilities.py code/evaluate/fixed_generation_probabilities.py
 	python code/evaluate/make_learning_curves.py \
 		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
 		--net_idx $(NET_ID) \
 		--device "cuda:0" \
-		--num_samples 10 \
+		--num_samples $(NUM_SAMPLES) \
 		--bayes-net-file data/bayes_nets/nets_n-$(N_NETS)_nodes-$(N_NODES)_edges-$(N_EDGES).pkl
 
-data/evaluation/losses/losses-$(MODEL_NAME).csv: code/evaluate/compile_losses.py $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin
-	python code/evaluate/compile_losses.py \
-		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)
+data/evaluation/base-model-$(BASE_MODEL_NAME)/losses/losses-$(MODEL_NAME).csv: code/evaluate/compile_training_losses.py $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin
+	python code/evaluate/compile_training_losses.py \
+		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
+		--base_arch $(BASE_MODEL_NAME)
+
+data/evaluation/base-model-$(BASE_MODEL_NAME)/eval-results/eval-results-$(MODEL_NAME).csv: code/evaluate/compile_eval_results.py
+	python code/evaluate/compile_eval_results.py \
+		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
+		--base_arch $(BASE_MODEL_NAME)
+
+$(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/eval_results.json: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin
+	python code/finetune/compute_perplexities.py \
+		--model_folder $(MODEL_ROOT_FOLDER)/$(MODEL_NAME) \
+		--base_arch $(BASE_MODEL_NAME) \
+		--include_checkpoints
+
 
 results: data/evaluation/true-probs/true-probabilities-net-$(NET_ID).csv \
- data/evaluation/fixed-gen-probabilities-$(MODEL_NAME).csv \
- data/evaluation/free-gen-probabilities-$(MODEL_NAME).csv \
- data/evaluation/scaffolded-gen-probabilities-$(MODEL_NAME).csv \
- data/evaluation/negative-scaffolded-gen-probabilities-$(MODEL_NAME).csv \
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/fixed-gen-probabilities-$(MODEL_NAME).csv \
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/free-gen-probabilities-$(MODEL_NAME)-$(NUM_SAMPLES)samples.csv \
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/scaffolded-gen-probabilities-$(MODEL_NAME)-$(NUM_SAMPLES)samples.csv \
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/negative-scaffolded-gen-probabilities-$(MODEL_NAME)-$(NUM_SAMPLES)samples.csv \
  $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin \
- data/evaluation/losses/losses-$(MODEL_NAME).csv
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/losses/losses-$(MODEL_NAME).csv
 
 learning_curves: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/pytorch_model.bin \
- data/evaluation/learning-curves/learning-curves-$(MODEL_NAME).csv \
- data/evaluation/losses/losses-$(MODEL_NAME).csv
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/learning-curves/learning-curves-$(MODEL_NAME).csv \
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/losses/losses-$(MODEL_NAME).csv
+
+eval_results: $(MODEL_ROOT_FOLDER)/$(MODEL_NAME)/eval_results.json \
+ data/evaluation/base-model-$(BASE_MODEL_NAME)/eval-results/eval-results-$(MODEL_NAME).csv

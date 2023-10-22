@@ -21,6 +21,8 @@ export N_TRAIN_STEPS=300001  # but we limit the number of training steps
 # Fine-tuning and beyond
 export MODEL_ROOT_FOLDER=$DATA_ROOT_DIR
 export BASE_MODEL_PATH=${MODEL_ROOT_FOLDER}/base-lm
+export BASE_MODEL_NAME=base-lm
+export NUM_SAMPLES=10
 
 conditions=( "local_joint_zipf" "wrong_local_joint_exp" "wrong_local_joint_zipf" "fully_observed" )
 

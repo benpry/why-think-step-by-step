@@ -17,10 +17,12 @@ export TOTAL_CHECKPOINTS=1000
 export CHECKPOINT_INTERVAL=5000
 export N_EPOCHS=50  # too many epochs
 export N_TRAIN_STEPS=300001  # but we limit the number of training steps
+export NUM_SAMPLES=10
 
 # Fine-tuning and beyond
 export MODEL_ROOT_FOLDER=$DATA_ROOT_DIR/learning-curve-models
 export BASE_MODEL_PATH=$MODEL_ROOT_FOLDER/base-lm
+export BASE_MODEL_NAME="${BASE_MODEL_PATH##*/}"
 
 conditions=( "local_joint_exp" "fully_observed_held_out" )
 
@@ -30,4 +32,5 @@ for condition in "${conditions[@]}"; do
     CONDITION_WITH_HYPHEN=$(echo $condition | tr _ -)
     export MODEL_NAME="${CONDITION_WITH_HYPHEN}-net-${NET_ID}"
     make learning_curves
+    make eval_results
 done

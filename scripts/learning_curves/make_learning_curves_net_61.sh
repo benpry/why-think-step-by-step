@@ -22,7 +22,7 @@ export N_TRAIN_STEPS=300001  # but we limit the number of training steps
 export MODEL_ROOT_FOLDER=$DATA_ROOT_DIR/learning-curve-models
 export BASE_MODEL_PATH=$MODEL_ROOT_FOLDER/base-lm
 
-conditions=( "local_joint_exp" "fully_observed_held_out" )
+conditions=( "fully_observed_held_out" "local_joint_exp" )
 
 for condition in "${conditions[@]}"; do
     export SAMPLE_FORMAT=$condition
